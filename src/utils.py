@@ -3,6 +3,7 @@ import plotly.express as px
 import pandas as pd
 from scipy.signal import lombscargle
 import re
+import matplotlib.pyplot as plt
 
 def get_time_series(path, point, quantity):
     """
@@ -27,7 +28,8 @@ def get_time_series(path, point, quantity):
         try:
             y = df[f'{point}_{quantity}'].values
         except KeyError:
-            point = f"p{int(re.findall(r'-?\d*\.?\d+', point)[0])-1}"
+            number = int(re.findall(r'-?\d*\.?\d+', point)[0]) - 1
+            point = f"p{number}"
     if point != old_point:
         print(f"[INFO] Point {old_point} did not exist. Returning values for point {point}")
     return t, y
@@ -55,8 +57,11 @@ def get_frequency_lombscargle(t, y, freqs=np.linspace(0.01, 5, 20000), warmup_pe
     window = np.hanning(len(y))
     y_windowed = y_detrended * window
 
-    pgram = lombscargle(y, y_windowed, w, precenter=True)
+    pgram = lombscargle(t, y_windowed, w, precenter=True)
     pgram = pgram / np.max(pgram)
+
+    """plt.scatter(freqs, pgram)
+    plt.show()"""
     return freqs[np.where(pgram == 1)][0]
 
 
