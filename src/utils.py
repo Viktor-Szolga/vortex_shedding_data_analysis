@@ -35,12 +35,13 @@ def get_time_series(path, point, quantity):
     return t, y
 
 
-def get_frequency_lombscargle(t, y, freqs=np.linspace(0.01, 5, 20000), warmup_period=True):
+def get_frequency_lombscargle(t, y, threshold, freqs=np.linspace(0.01, 5, 20000), warmup_period=True):
     """
     Extract dominant frequency from y using Least-squares spectral analysis (Lomb-Scargle periodogram)
     Args:
         t (np.ndarray): sampling time in seconds
         y (np.ndarray): Signal
+        threshold (float): 
         freqs (np.ndarray): The frequency space to search through
         warmup_period (Boolean): If true only the second half of the signal is used to extract frequencies
 
@@ -58,14 +59,16 @@ def get_frequency_lombscargle(t, y, freqs=np.linspace(0.01, 5, 20000), warmup_pe
     y_windowed = y_detrended * window
 
     pgram = lombscargle(t, y_windowed, w, precenter=True)
+    #add threshold, else return 0
+    pgram = np.where(pgram>threshold, pgram, 0)
+    if np.all(pgram <= 0): return 0
+
     pgram = pgram / np.max(pgram)
 
-    """plt.scatter(freqs, pgram)
-    plt.show()"""
     return freqs[np.where(pgram == 1)][0]
 
 
-def get_frequency_fourier(t, y, warmup_period=True):
+def get_frequency_fourier(t, y, threshold,warmup_period=True):
     """
     Extract dominant frequency from y using interpolation and FFT
     Args:
@@ -95,6 +98,10 @@ def get_frequency_fourier(t, y, warmup_period=True):
     freqs = np.fft.rfftfreq(n, d=dt_avg)
 
     power = np.abs(yf)**2
+    #add threshold, else return 0
+    power = np.where(power>threshold, power, 0)
+    if np.all(power <= 0): return 0
+
     power = power / np.max(power)
     return freqs[np.where(power == 1)][0]
 
