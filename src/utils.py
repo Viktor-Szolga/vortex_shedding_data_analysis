@@ -35,12 +35,13 @@ def get_time_series(path, point, quantity):
     return t, y
 
 
-def get_frequency_lombscargle(t, y, freqs=np.linspace(0.01, 5, 20000), warmup_period=True):
+def get_frequency_lombscargle(t, y, threshold, freqs=np.linspace(0.01, 5, 20000), warmup_period=True):
     """
     Extract dominant frequency from y using Least-squares spectral analysis (Lomb-Scargle periodogram)
     Args:
         t (np.ndarray): sampling time in seconds
         y (np.ndarray): Signal
+        threshold (float): 
         freqs (np.ndarray): The frequency space to search through
         warmup_period (Boolean): If true only the second half of the signal is used to extract frequencies
 
@@ -58,14 +59,16 @@ def get_frequency_lombscargle(t, y, freqs=np.linspace(0.01, 5, 20000), warmup_pe
     y_windowed = y_detrended * window
 
     pgram = lombscargle(t, y_windowed, w, precenter=True)
+    #add threshold, else return 0
+    pgram = np.where(pgram>threshold, pgram, 0)
+    if np.all(pgram <= 0): return 0
+
     pgram = pgram / np.max(pgram)
 
-    """plt.scatter(freqs, pgram)
-    plt.show()"""
     return freqs[np.where(pgram == 1)][0]
 
 
-def get_frequency_fourier(t, y, warmup_period=True):
+def get_frequency_fourier(t, y, threshold,warmup_period=True):
     """
     Extract dominant frequency from y using interpolation and FFT
     Args:
@@ -95,6 +98,10 @@ def get_frequency_fourier(t, y, warmup_period=True):
     freqs = np.fft.rfftfreq(n, d=dt_avg)
 
     power = np.abs(yf)**2
+    #add threshold, else return 0
+    power = np.where(power>threshold, power, 0)
+    if np.all(power <= 0): return 0
+
     power = power / np.max(power)
     return freqs[np.where(power == 1)][0]
 
@@ -112,3 +119,26 @@ def strouhal_number(shedding_freq, flow_velocity, characteristic_length):
     """
     return shedding_freq*characteristic_length/flow_velocity
 
+def print_run_stats():
+    """
+    Prints Reynolds number, velocity, time of simulation for each run.
+    """
+    characteristic_length = 0.05
+    kinematic_viscosity = 1.5e-5
+    t_star = 600
+
+    reynolds_numbers = [20, 50, 100, 500, 1e3, 5e3, 1e4, 5e4, 1e5, 5e5, 1e6, 150]
+
+    velocities = [Re * kinematic_viscosity / characteristic_length
+                for Re in reynolds_numbers]
+
+    simulation_times = [
+        t_star * characteristic_length / U if U > 0 else float("inf")
+        for U in velocities
+    ]
+
+    print(f"{'Re':>10} {'Velocity [m/s]':>18} {'Sim time [s] (t*=250)':>25}")
+    print("-" * 55)
+
+    for Re, U, t in zip(reynolds_numbers, velocities, simulation_times):
+        print(f"{Re:10.0f} {U:18.6f} {t:25.2f}")
