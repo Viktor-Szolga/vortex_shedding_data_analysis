@@ -112,3 +112,26 @@ def strouhal_number(shedding_freq, flow_velocity, characteristic_length):
     """
     return shedding_freq*characteristic_length/flow_velocity
 
+def print_run_stats():
+    """
+    Prints Reynolds number, velocity, time of simulation for each run.
+    """
+    characteristic_length = 0.05
+    kinematic_viscosity = 1.5e-5
+    t_star = 600
+
+    reynolds_numbers = [20, 50, 100, 500, 1e3, 5e3, 1e4, 5e4, 1e5, 5e5, 1e6, 150]
+
+    velocities = [Re * kinematic_viscosity / characteristic_length
+                for Re in reynolds_numbers]
+
+    simulation_times = [
+        t_star * characteristic_length / U if U > 0 else float("inf")
+        for U in velocities
+    ]
+
+    print(f"{'Re':>10} {'Velocity [m/s]':>18} {'Sim time [s] (t*=250)':>25}")
+    print("-" * 55)
+
+    for Re, U, t in zip(reynolds_numbers, velocities, simulation_times):
+        print(f"{Re:10.0f} {U:18.6f} {t:25.2f}")
