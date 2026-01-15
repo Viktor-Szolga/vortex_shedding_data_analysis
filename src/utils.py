@@ -4,6 +4,114 @@ import pandas as pd
 from scipy.signal import lombscargle
 import re
 import matplotlib.pyplot as plt
+import io
+
+
+def parse_openfoam_log_to_df(log_content):
+    """
+    Hardcore vibe coded log parser (regex is ned lustig), muss nu gecheckt werden ob da eh ka fantasie dabei is
+    """
+    data = []
+    current_step = {}
+
+    # Regex Compilations
+    re_time = re.compile(r"^Time = ([\d\.eE\-\+]+)")
+    re_exec_time = re.compile(r"ExecutionTime = ([\d\.eE\-\+]+)")
+    re_u_vector = re.compile(r"areaAverage\(.*\) of U = \(([\d\.eE\-\+]+)\s+([\d\.eE\-\+]+)\s+([\d\.eE\-\+]+)\)")
+    re_courant = re.compile(r"Courant Number mean: ([\d\.eE\-\+]+)\s+max: ([\d\.eE\-\+]+)")
+    
+    # Matches: Solving for p, Initial residual = 0.004...
+    re_residuals = re.compile(
+        r"Solving for ([a-zA-Z0-9_]+),.*Initial residual = ([\d\.eE\-\+]+),.*Final residual = ([\d\.eE\-\+]+),.*No Iterations ([\d]+)"
+    )
+    
+    # Matches: time step continuity errors : sum local = 1.2e-12, global = ...
+    re_continuity = re.compile(
+        r"time step continuity errors : sum local = ([\d\.eE\-\+]+), global = ([\d\.eE\-\+]+)"
+    )
+    # Matches optional cumulative part separately or we can just extract it if it exists
+    re_cumulative = re.compile(r"cumulative = ([\d\.eE\-\+]+)")
+
+    for line in log_content.split('\n'):
+        line = line.strip()
+
+        # Time
+        m_time = re_time.search(line)
+        if m_time:
+            current_step['Time'] = float(m_time.group(1))
+            continue
+
+        # Velocity Vector
+        m_u = re_u_vector.search(line)
+        if m_u:
+            current_step['Ux'] = float(m_u.group(1))
+            current_step['Uy'] = float(m_u.group(2))
+            current_step['Uz'] = float(m_u.group(3))
+            continue
+
+        # Courant Numbers
+        m_co = re_courant.search(line)
+        if m_co:
+            current_step['Courant_Mean'] = float(m_co.group(1))
+            current_step['Courant_Max'] = float(m_co.group(2))
+            continue
+
+        # Residuals (Dynamic field names)
+        m_res = re_residuals.search(line)
+        if m_res:
+            field = m_res.group(1)
+            # We use f-strings to dynamically name columns like "p_InitialRes"
+            current_step[f'{field}_InitialRes'] = float(m_res.group(2))
+            current_step[f'{field}_FinalRes'] = float(m_res.group(3))
+            current_step[f'{field}_Iters'] = int(m_res.group(4))
+            continue
+
+        # Continuity Errors
+        m_cont = re_continuity.search(line)
+        if m_cont:
+            current_step['Cont_Local'] = float(m_cont.group(1))
+            current_step['Cont_Global'] = float(m_cont.group(2))
+            # Check for cumulative on the same line
+            m_cum = re_cumulative.search(line)
+            if m_cum:
+                current_step['Cont_Cumulative'] = float(m_cum.group(1))
+            continue
+
+        # Execution Time (End of Step)
+        m_exec = re_exec_time.search(line)
+        if m_exec:
+            current_step['ExecutionTime'] = float(m_exec.group(1))
+            
+            if 'Time' in current_step:
+                data.append(current_step.copy())
+            
+            current_step = {}
+
+    if data:
+        df = pd.DataFrame(data)
+        df.set_index('Time', inplace=True)
+        return df
+    else:
+        return pd.DataFrame()
+# --- Usage Example ---
+# Assuming 'log_text' contains your provided string:
+# df = parse_openfoam_log_to_df(log_text)
+# print(df)
+
+reynolds_to_velocity = {
+    20: 0.006,
+    50: 0.015,
+    100: 0.03,
+    500: 0.15,
+    1000: 0.3,
+    5000: 1.5,
+    10000: 3.0,
+    50000: 15.0,
+    100000: 30.0,
+    500000: 150.0,
+    1000000: 300.0,
+    150: 0.045
+}
 
 def get_time_series(path, point, quantity):
     """
@@ -35,7 +143,7 @@ def get_time_series(path, point, quantity):
     return t, y
 
 
-def get_frequency_lombscargle(t, y, threshold, freqs=np.linspace(0.01, 5, 20000), warmup_period=True):
+def get_frequency_lombscargle(t, y, threshold=1e-5, freqs=np.linspace(0.01, 5, 20000), warmup_period=True):
     """
     Extract dominant frequency from y using Least-squares spectral analysis (Lomb-Scargle periodogram)
     Args:
@@ -61,14 +169,14 @@ def get_frequency_lombscargle(t, y, threshold, freqs=np.linspace(0.01, 5, 20000)
     pgram = lombscargle(t, y_windowed, w, precenter=True)
     #add threshold, else return 0
     pgram = np.where(pgram>threshold, pgram, 0)
-    if np.all(pgram <= 0): return 0
+    if np.all(pgram <= 0): return np.nan
 
     pgram = pgram / np.max(pgram)
 
     return freqs[np.where(pgram == 1)][0]
 
 
-def get_frequency_fourier(t, y, threshold,warmup_period=True):
+def get_frequency_fourier(t, y, threshold=1e-5, warmup_period=True):
     """
     Extract dominant frequency from y using interpolation and FFT
     Args:
@@ -92,15 +200,16 @@ def get_frequency_fourier(t, y, threshold,warmup_period=True):
     y_detrended = y_uniform - np.mean(y_uniform)
     window = np.hanning(len(y_detrended))
     y_windowed = y_detrended * window
-
     n = len(y_windowed)
     yf = np.fft.rfft(y_windowed)
     freqs = np.fft.rfftfreq(n, d=dt_avg)
 
     power = np.abs(yf)**2
     #add threshold, else return 0
+    if max(power) < threshold:
+        return np.nan
     power = np.where(power>threshold, power, 0)
-    if np.all(power <= 0): return 0
+    if np.all(power <= 0): return np.nan
 
     power = power / np.max(power)
     return freqs[np.where(power == 1)][0]
