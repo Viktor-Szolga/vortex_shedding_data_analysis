@@ -90,6 +90,7 @@ def parse_openfoam_log_to_df(log_content):
     if data:
         df = pd.DataFrame(data)
         df.set_index('Time', inplace=True)
+        df.reset_index(inplace=True)
         return df
     else:
         return pd.DataFrame()
